@@ -5,13 +5,13 @@ import {
   addDoc,
   updateDoc,
   deleteDoc,
-  getDocs,
   doc,
+  onSnapshot,
 } from "firebase/firestore";
 
 export default function BlueParkAdmin() {
   const [currentUser, setCurrentUser] = useState(null);
-  const [users, setUsers] = useState([{ username: "admin", password: "1234", isAdmin: true }]);
+  const [users] = useState([{ username: "admin", password: "1234", isAdmin: true }]);
   const [trips, setTrips] = useState([]);
   const [newTrip, setNewTrip] = useState({
     org: "",
@@ -21,21 +21,23 @@ export default function BlueParkAdmin() {
     people: "",
   });
   const [editingTrip, setEditingTrip] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   const tripsCollection = collection(db, "trips");
 
-  // Load trips from Firestore
+  // ✅ Real-time listener (auto updates when data changes)
   useEffect(() => {
-    const loadTrips = async () => {
-      const querySnapshot = await getDocs(tripsCollection);
-      const tripData = querySnapshot.docs.map((doc) => ({
+    const unsubscribe = onSnapshot(tripsCollection, (snapshot) => {
+      const tripData = snapshot.docs.map((doc) => ({
         id: doc.id,
         ...doc.data(),
       }));
       setTrips(tripData);
-    };
-    loadTrips();
-  }, []);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [tripsCollection]);
 
   const handleLogin = (username, password) => {
     const user = users.find(
@@ -46,23 +48,27 @@ export default function BlueParkAdmin() {
   };
 
   const handleAddTrip = async () => {
-    if (!newTrip.org || !newTrip.start || !newTrip.time) return alert("Please fill all required fields");
+    if (!newTrip.org || !newTrip.start || !newTrip.time)
+      return alert("Please fill all required fields");
+
+    setLoading(true);
     await addDoc(tripsCollection, newTrip);
-    const updatedTrips = [...trips, newTrip];
-    setTrips(updatedTrips);
     setNewTrip({ org: "", start: "", end: "", time: "", people: "" });
+    setLoading(false);
   };
 
   const handleEditTrip = async (id, updatedTrip) => {
     const tripRef = doc(db, "trips", id);
+    setLoading(true);
     await updateDoc(tripRef, updatedTrip);
-    setTrips(trips.map((t) => (t.id === id ? { ...t, ...updatedTrip } : t)));
+    setLoading(false);
     setEditingTrip(null);
   };
 
   const handleDeleteTrip = async (id) => {
+    setLoading(true);
     await deleteDoc(doc(db, "trips", id));
-    setTrips(trips.filter((t) => t.id !== id));
+    setLoading(false);
   };
 
   if (!currentUser) {
@@ -72,6 +78,7 @@ export default function BlueParkAdmin() {
   return (
     <div style={styles.container}>
       <h1 style={styles.header}>BluePark Admin Dashboard</h1>
+      {loading && <p style={{ color: "gray" }}>Loading...</p>}
 
       <div style={styles.form}>
         <input
