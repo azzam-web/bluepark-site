@@ -1,358 +1,247 @@
-import React, { useEffect, useState } from "react";
-import logo from "./assets/bluepark-logo.png";
-
-const Icon = ({ children, style }) => <span style={{ marginRight: 8, ...style }}>{children}</span>;
-
-const STORAGE_KEYS = {
-  USERS: "bluepark_users_v1",
-  TRIPS: "bluepark_trips_v1",
-  CURRENT: "bluepark_current_v1",
-};
+import React, { useState, useEffect } from "react";
+import { db } from "./firebase";
+import {
+  collection,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  getDocs,
+  doc,
+} from "firebase/firestore";
 
 export default function BlueParkAdmin() {
-  const [users, setUsers] = useState([]);
-  const [trips, setTrips] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
+  const [users, setUsers] = useState([{ username: "admin", password: "1234", isAdmin: true }]);
+  const [trips, setTrips] = useState([]);
   const [newTrip, setNewTrip] = useState({
     org: "",
     start: "",
     end: "",
     time: "",
-    capacity: "",
+    people: "",
   });
-  const [showLogin, setShowLogin] = useState(false);
-  const [loginData, setLoginData] = useState({ username: "", password: "" });
+  const [editingTrip, setEditingTrip] = useState(null);
 
+  const tripsCollection = collection(db, "trips");
+
+  // Load trips from Firestore
   useEffect(() => {
-    const savedUsers = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS)) || [
-      { username: "azzam", password: "1234", isAdmin: true },
-    ];
-    const savedTrips = JSON.parse(localStorage.getItem(STORAGE_KEYS.TRIPS)) || [];
-    const savedCurrent = JSON.parse(localStorage.getItem(STORAGE_KEYS.CURRENT));
-    setUsers(savedUsers);
-    setTrips(savedTrips);
-    setCurrentUser(savedCurrent);
+    const loadTrips = async () => {
+      const querySnapshot = await getDocs(tripsCollection);
+      const tripData = querySnapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      setTrips(tripData);
+    };
+    loadTrips();
   }, []);
 
-  const saveData = (key, data) => localStorage.setItem(key, JSON.stringify(data));
-
-  // ✅ Always store normalized ISO date (YYYY-MM-DD)
-  const normalizeDate = (value) => {
-    if (!value) return "";
-    const dt = new Date(value);
-    if (isNaN(dt)) return value;
-    return dt.toISOString().slice(0, 10);
+  const handleLogin = (username, password) => {
+    const user = users.find(
+      (u) => u.username === username && u.password === password
+    );
+    if (user) setCurrentUser(user);
+    else alert("Invalid credentials");
   };
 
-  // ✅ Force format in English Gregorian, not Arabic Hijri
-  const formatDate = (value) => {
-    if (!value) return "";
-    try {
-      const date = new Date(value);
-      if (isNaN(date)) return value;
-      return date.toLocaleDateString("en-US", {
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        timeZone: "UTC",
-      });
-    } catch {
-      return value;
-    }
+  const handleAddTrip = async () => {
+    if (!newTrip.org || !newTrip.start || !newTrip.time) return alert("Please fill all required fields");
+    await addDoc(tripsCollection, newTrip);
+    const updatedTrips = [...trips, newTrip];
+    setTrips(updatedTrips);
+    setNewTrip({ org: "", start: "", end: "", time: "", people: "" });
   };
 
-  const login = () => {
-    const { username, password } = loginData;
-    const found = users.find((u) => u.username === username && u.password === password);
-    if (found) {
-      setCurrentUser(found);
-      saveData(STORAGE_KEYS.CURRENT, found);
-      setShowLogin(false);
-      setLoginData({ username: "", password: "" });
-    } else {
-      alert("Invalid username or password");
-    }
+  const handleEditTrip = async (id, updatedTrip) => {
+    const tripRef = doc(db, "trips", id);
+    await updateDoc(tripRef, updatedTrip);
+    setTrips(trips.map((t) => (t.id === id ? { ...t, ...updatedTrip } : t)));
+    setEditingTrip(null);
   };
 
-  const logout = () => {
-    setCurrentUser(null);
-    localStorage.removeItem(STORAGE_KEYS.CURRENT);
+  const handleDeleteTrip = async (id) => {
+    await deleteDoc(doc(db, "trips", id));
+    setTrips(trips.filter((t) => t.id !== id));
   };
 
-  const addTrip = () => {
-    if (!newTrip.org || !newTrip.start || !newTrip.time || !newTrip.capacity) {
-      alert("Please fill all required fields");
-      return;
-    }
-
-    const startISO = normalizeDate(newTrip.start);
-    const endISO = newTrip.end ? normalizeDate(newTrip.end) : "";
-
-    const tripToSave = {
-      id: Date.now(),
-      org: newTrip.org.trim(),
-      start: startISO,
-      end: endISO,
-      time: newTrip.time,
-      capacity: Number(newTrip.capacity) || 0,
-    };
-
-    const updated = [...trips, tripToSave];
-    setTrips(updated);
-    saveData(STORAGE_KEYS.TRIPS, updated);
-    setNewTrip({ org: "", start: "", end: "", time: "", capacity: "" });
-  };
-
-  const deleteTrip = (id) => {
-    if (!window.confirm("Delete this trip?")) return;
-    const updated = trips.filter((t) => t.id !== id);
-    setTrips(updated);
-    saveData(STORAGE_KEYS.TRIPS, updated);
-  };
-
-  const styles = {
-    page: {
-      minHeight: "100vh",
-      padding: 24,
-      fontFamily: "'Segoe UI', Roboto, Arial, sans-serif",
-      color: "#0f172a",
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      background:
-        "linear-gradient(135deg, rgba(30,64,175,1) 0%, rgba(147,197,253,1) 50%, rgba(255,255,255,1) 100%)",
-      backgroundSize: "400% 400%",
-      animation: "gradientMove 15s ease infinite",
-    },
-    card: {
-      width: "100%",
-      maxWidth: 980,
-      background: "rgba(255,255,255,0.90)",
-      borderRadius: 16,
-      boxShadow: "0 10px 30px rgba(2,6,23,0.12)",
-      padding: 22,
-      marginBottom: 18,
-      backdropFilter: "blur(6px)",
-    },
-    headerLogo: {
-      width: 110,
-      height: 110,
-      objectFit: "contain",
-      borderRadius: 12,
-      boxShadow: "0 6px 18px rgba(2,6,23,0.12)",
-      display: "block",
-      margin: "0 auto 12px",
-    },
-    title: { textAlign: "center", color: "#1446A0", margin: 0, fontSize: 32, fontWeight: 700 },
-    tagline: { textAlign: "center", color: "#334155", marginTop: 6 },
-    btnPrimary: {
-      background: "#0ea5e9",
-      color: "#fff",
-      border: "none",
-      padding: "10px 14px",
-      borderRadius: 10,
-      cursor: "pointer",
-      boxShadow: "0 6px 16px rgba(14,165,233,0.18)",
-      transition: "transform 0.2s",
-    },
-    btnDanger: {
-      background: "#ef4444",
-      color: "#fff",
-      border: "none",
-      padding: "8px 12px",
-      borderRadius: 8,
-      cursor: "pointer",
-    },
-    tripCard: {
-      borderRadius: 12,
-      padding: 14,
-      background: "linear-gradient(90deg, rgba(240,249,255,1) 0%, rgba(255,255,255,1) 100%)",
-      boxShadow: "0 6px 18px rgba(2,6,23,0.06)",
-      border: "1px solid rgba(15,66,140,0.06)",
-      marginTop: 10,
-    },
-    input: {
-      padding: 10,
-      borderRadius: 8,
-      border: "1px solid #CBD5E1",
-      width: "100%",
-      outline: "none",
-      transition: "border-color 0.3s",
-    },
-    overlay: {
-      position: "fixed",
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background: "rgba(0,0,0,0.4)",
-      display: "flex",
-      justifyContent: "center",
-      alignItems: "center",
-      zIndex: 999,
-    },
-    loginCard: {
-      background: "#fff",
-      padding: 24,
-      borderRadius: 12,
-      boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
-      width: 300,
-      display: "flex",
-      flexDirection: "column",
-      gap: 12,
-    },
-  };
+  if (!currentUser) {
+    return <Login onLogin={handleLogin} />;
+  }
 
   return (
-    <div style={styles.page}>
-      <style>
-        {`@keyframes gradientMove {
-          0% { background-position: 0% 50%; }
-          50% { background-position: 100% 50%; }
-          100% { background-position: 0% 50%; }
-        }`}
-      </style>
+    <div style={styles.container}>
+      <h1 style={styles.header}>BluePark Admin Dashboard</h1>
 
-      {/* Header */}
-      <div style={styles.card}>
-        <img src={logo} alt="BluePark Logo" style={styles.headerLogo} />
-        <h1 style={styles.title}>BluePark</h1>
-        <p style={styles.tagline}>Trips Schedule</p>
-        <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 14 }}>
-          {!currentUser ? (
-            <button onClick={() => setShowLogin(true)} style={styles.btnPrimary}>
-              🌐 Admin Login
-            </button>
-          ) : (
-            <>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontWeight: 700 }}>{currentUser.username}</span>
-                <span style={{ color: "#475569", fontSize: 13 }}>
-                  {currentUser.isAdmin ? "Admin" : "User"}
-                </span>
-              </div>
-              <button onClick={logout} style={styles.btnDanger}>
-                Log out
-              </button>
-            </>
-          )}
-        </div>
+      <div style={styles.form}>
+        <input
+          style={styles.input}
+          placeholder="Organization"
+          value={newTrip.org}
+          onChange={(e) => setNewTrip({ ...newTrip, org: e.target.value })}
+        />
+        <input
+          style={styles.input}
+          type="date"
+          value={newTrip.start}
+          onChange={(e) => setNewTrip({ ...newTrip, start: e.target.value })}
+        />
+        <input
+          style={styles.input}
+          type="date"
+          value={newTrip.end}
+          onChange={(e) => setNewTrip({ ...newTrip, end: e.target.value })}
+        />
+        <input
+          style={styles.input}
+          type="time"
+          value={newTrip.time}
+          onChange={(e) => setNewTrip({ ...newTrip, time: e.target.value })}
+        />
+        <input
+          style={styles.input}
+          placeholder="Number of People"
+          value={newTrip.people}
+          onChange={(e) => setNewTrip({ ...newTrip, people: e.target.value })}
+        />
+        <button style={styles.button} onClick={handleAddTrip}>
+          Add Trip
+        </button>
       </div>
 
-      {/* Login popup */}
-      {showLogin && (
-        <div style={styles.overlay}>
-          <div style={styles.loginCard}>
-            <h3 style={{ textAlign: "center", margin: 0, color: "#1446A0" }}>Admin Login</h3>
-            <input
-              style={styles.input}
-              placeholder="Username"
-              value={loginData.username}
-              onChange={(e) => setLoginData({ ...loginData, username: e.target.value })}
-            />
-            <input
-              style={styles.input}
-              type="password"
-              placeholder="Password"
-              value={loginData.password}
-              onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
-            />
-            <button onClick={login} style={styles.btnPrimary}>
-              Login
-            </button>
-            <button onClick={() => setShowLogin(false)} style={styles.btnDanger}>
-              Cancel
-            </button>
+      <div style={styles.list}>
+        {trips.map((trip) => (
+          <div key={trip.id} style={styles.tripCard}>
+            {editingTrip === trip.id ? (
+              <TripEditor
+                trip={trip}
+                onSave={(updated) => handleEditTrip(trip.id, updated)}
+                onCancel={() => setEditingTrip(null)}
+              />
+            ) : (
+              <>
+                <p><strong>Organization:</strong> {trip.org}</p>
+                <p><strong>Dates:</strong> {trip.start} — {trip.end || "N/A"}</p>
+                <p><strong>Time:</strong> {trip.time}</p>
+                <p><strong>People:</strong> {trip.people}</p>
+                <button style={styles.smallBtn} onClick={() => setEditingTrip(trip.id)}>Edit</button>
+                <button style={styles.smallBtn} onClick={() => handleDeleteTrip(trip.id)}>Delete</button>
+              </>
+            )}
           </div>
-        </div>
-      )}
-
-      {/* Trips */}
-      <div style={styles.card}>
-        <h2 style={{ margin: 0, color: "#0b57b2" }}>Upcoming Trips</h2>
-        {trips.length === 0 && (
-          <p style={{ color: "#475569", marginTop: 10 }}>No trips available yet.</p>
-        )}
-        <div style={{ marginTop: 10, display: "grid", gap: 12 }}>
-          {trips.map((trip) => (
-            <div key={trip.id} style={styles.tripCard}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                <div>
-                  <h3 style={{ margin: 0, color: "#123e8a" }}>{trip.org}</h3>
-                  <div style={{ color: "#334155", marginTop: 8, fontSize: 14 }}>
-                    <div>
-                      <Icon>📅</Icon>{" "}
-                      {trip.end
-                        ? `${formatDate(trip.start)} — ${formatDate(trip.end)}`
-                        : formatDate(trip.start)}
-                    </div>
-                    <div>
-                      <Icon>⏰</Icon> {trip.time}
-                    </div>
-                    <div>
-                      <Icon>👥</Icon> {trip.capacity} people
-                    </div>
-                  </div>
-                </div>
-                {currentUser?.isAdmin && (
-                  <button onClick={() => deleteTrip(trip.id)} style={styles.btnDanger}>
-                    Delete
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
+        ))}
       </div>
-
-      {/* Admin Dashboard */}
-      {currentUser?.isAdmin && (
-        <div style={styles.card}>
-          <h3>Admin Dashboard</h3>
-          <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr", alignItems: "center" }}>
-            <input
-              style={styles.input}
-              placeholder="Organization"
-              value={newTrip.org}
-              onChange={(e) => setNewTrip({ ...newTrip, org: e.target.value })}
-            />
-            <input
-              style={styles.input}
-              type="date"
-              value={newTrip.start}
-              onChange={(e) => setNewTrip({ ...newTrip, start: e.target.value })}
-            />
-            <input
-              style={styles.input}
-              type="date"
-              value={newTrip.end}
-              onChange={(e) => setNewTrip({ ...newTrip, end: e.target.value })}
-            />
-            <input
-              style={styles.input}
-              type="time"
-              value={newTrip.time}
-              onChange={(e) => setNewTrip({ ...newTrip, time: e.target.value })}
-            />
-            <input
-              style={styles.input}
-              placeholder="Capacity"
-              type="number"
-              value={newTrip.capacity}
-              onChange={(e) => setNewTrip({ ...newTrip, capacity: e.target.value })}
-            />
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button onClick={addTrip} style={styles.btnPrimary}>
-                ➕ Add Trip
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div style={{ marginTop: 10, width: "100%", maxWidth: 980, textAlign: "center", color: "#0b1433" }}>
-        Made by <strong>Eng.Azzam</strong>
-      </div>
+      <p style={styles.footer}>Made by Eng. Azzam</p>
     </div>
   );
 }
+
+function Login({ onLogin }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  return (
+    <div style={styles.loginBox}>
+      <h2>BluePark Admin Login</h2>
+      <input
+        style={styles.input}
+        placeholder="Username"
+        value={username}
+        onChange={(e) => setUsername(e.target.value)}
+      />
+      <input
+        style={styles.input}
+        type="password"
+        placeholder="Password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+      />
+      <button style={styles.button} onClick={() => onLogin(username, password)}>
+        Login
+      </button>
+    </div>
+  );
+}
+
+function TripEditor({ trip, onSave, onCancel }) {
+  const [edited, setEdited] = useState(trip);
+  return (
+    <div>
+      <input
+        style={styles.input}
+        value={edited.org}
+        onChange={(e) => setEdited({ ...edited, org: e.target.value })}
+      />
+      <input
+        style={styles.input}
+        type="date"
+        value={edited.start}
+        onChange={(e) => setEdited({ ...edited, start: e.target.value })}
+      />
+      <input
+        style={styles.input}
+        type="date"
+        value={edited.end}
+        onChange={(e) => setEdited({ ...edited, end: e.target.value })}
+      />
+      <input
+        style={styles.input}
+        type="time"
+        value={edited.time}
+        onChange={(e) => setEdited({ ...edited, time: e.target.value })}
+      />
+      <input
+        style={styles.input}
+        value={edited.people}
+        onChange={(e) => setEdited({ ...edited, people: e.target.value })}
+      />
+      <button style={styles.smallBtn} onClick={() => onSave(edited)}>Save</button>
+      <button style={styles.smallBtn} onClick={onCancel}>Cancel</button>
+    </div>
+  );
+}
+
+const styles = {
+  container: {
+    textAlign: "center",
+    maxWidth: 800,
+    margin: "0 auto",
+    padding: 20,
+  },
+  header: { color: "#007BFF", fontSize: 30 },
+  form: { marginBottom: 20 },
+  input: { margin: 5, padding: 8, borderRadius: 6, border: "1px solid #ccc" },
+  button: {
+    backgroundColor: "#007BFF",
+    color: "white",
+    padding: "8px 16px",
+    border: "none",
+    borderRadius: 6,
+    cursor: "pointer",
+  },
+  smallBtn: {
+    backgroundColor: "#28a745",
+    color: "white",
+    border: "none",
+    padding: "6px 10px",
+    margin: 4,
+    borderRadius: 5,
+    cursor: "pointer",
+  },
+  list: { marginTop: 20 },
+  tripCard: {
+    backgroundColor: "#f8f9fa",
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 10,
+    boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+  },
+  footer: {
+    marginTop: 40,
+    fontSize: 14,
+    color: "#777",
+  },
+  loginBox: {
+    textAlign: "center",
+    marginTop: 100,
+  },
+};
